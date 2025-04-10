@@ -26,61 +26,63 @@ structure Error where
   id : UInt64
 deriving ToJson, FromJson
 
-structure Server (m : Type → Type) [MonadExcept ε m] where
-  getRequest : m Request
-  notify (req : Request) : m Unit
-  mkError (req : Request) (err : ε) : m Error
-  respond (method : String) (params : Json) : m Json
-  sendResponse (response : Response) : m Unit
-  sendError (err : Error) : m Unit
+inductive Output where
+  | response : Json → Output
+  | error : ErrorObj → Output
 
-def Server.step [Monad m] [MonadExcept ε m]
-    (s : Server m) : m Unit := do
+structure Server (m : Type → Type) where
+  getRequest : m Request
+  notify (method : String) (params : Json) : m Unit
+  getOutput (method : String) (params : Json) : m Output
+  sendResponse (response : Response) : m Unit
+  sendError (error : Error) : m Unit
+
+def Server.step [Monad m] (s : Server m) : m Unit := do
   let req ← s.getRequest
   match req.id with
-  | some id => 
-    try 
-      let res ← s.respond req.method req.params
-      s.sendResponse <| .mk res id
-    catch e => s.sendError <| ← s.mkError req e
-  | none => 
-    try s.notify req
-    catch e => s.sendError <| ← s.mkError req e
+  | some id => match ← s.getOutput req.method req.params with
+    | .response res => s.sendResponse <| .mk res id
+    | .error err => s.sendError <| .mk err id
+  | none => s.notify req.method req.params
 
 partial
-def Server.run [Monad m] [MonadLiftT IO m] [MonadExcept ε m] (s : Server m) : 
+def Server.run [Monad m] [MonadLiftT IO m] (s : Server m) : 
     m Unit := do 
   s.step
   if ← show IO _ from  IO.checkCanceled then return
   s.run
 
-structure StdServer (m : Type → Type) [MonadExcept ε m] where
-  mkError (req : Request) (err : ε) : m Error
-  respond (method : String) (params : Json) : m Json
+structure StdServer (m : Type → Type) where
+  notify (method : String) (params : Json) : m Unit
+  getOutput (method : String) (params : Json) : m Output
 
 -- Single thread
-def StdServer.server [Monad m] [MonadLiftT IO m] 
-    [MonadExcept ε m] (s : StdServer m) : 
+def StdServer.server [Monad m] [MonadLiftT IO m] (s : StdServer m) : 
     Server m where
-  getRequest := do
+  getRequest := do 
     let stdin ← show IO _ from IO.getStdin
     let line ← stdin.getLine
-    match Json.parse line.trim with
-    | .ok out => match fromJson? (α := Request) out with
-      | .ok out => return out
-      | .error e => show IO _ from throw <| .userError s!"[FATAL] Failed to parse json\n\n{out}\n\nas request:\n\n{e}"
-    | .error e => show IO _ from throw <| .userError s!"[FATAL] Failed to parse\n\n{line}\n\nas json:\n\n{e}"
-  notify req := do 
-    let s ← show IO _ from IO.getStdin
-    s.putStrLn (toJson req).compress
-    s.flush
-  mkError := s.mkError
-  respond := s.respond
+    match Json.parse line.trim with 
+    | .ok j => 
+      match fromJson? (α := Request) j with 
+      | .ok req => return req
+      | .error e => show IO _ from throw <| .userError <| 
+        s!"Failed to parse json\n\n{j}\n\nas request:\n{e}"
+    | .error e => show IO _ from throw <| .userError <| 
+      s!"Failed to parse\n\n{line}\n\nas json:\n{e}"
+  notify := s.notify
+  getOutput := s.getOutput
   sendResponse res := do 
-    let s ← show IO _ from IO.getStdin
-    s.putStrLn (toJson res).compress
-    s.flush
+    let stdout ← show IO _ from IO.getStdout
+    stdout.putStrLn <| (toJson res).compress
+    stdout.flush
   sendError err := do 
-    let s ← show IO _ from IO.getStdin
-    s.putStrLn (toJson err).compress
-    s.flush
+    let stdout ← show IO _ from IO.getStdout
+    stdout.putStrLn <| (toJson err).compress
+    stdout.flush
+
+def StdServer.step [Monad m] [MonadLiftT IO m] (s : StdServer m) : m Unit := 
+  s.server.step
+
+def StdServer.run [Monad m] [MonadLiftT IO m] (s : StdServer m) : m Unit := 
+  s.server.run
