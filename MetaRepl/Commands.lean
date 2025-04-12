@@ -1,4 +1,4 @@
-import MetaRepl.Command
+import MetaRepl.History
 
 namespace MetaRepl
 
@@ -11,7 +11,7 @@ open Lean Elab Tactic in
 
 @[command tactic]
 def tactic : Command TacticM where
-  paramsSchema := json% { type : "string" }
+  paramSchema := json% { type : "string" }
   description := "Eval a tactic"
   run p := do 
     match p.getStr? with

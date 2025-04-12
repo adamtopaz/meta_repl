@@ -7,12 +7,12 @@ namespace MetaRepl
 
 structure Command (m : Type → Type) where
   description : Option String := none
-  paramsSchema : Json := json% { type : ["object", "array", "string", "number", "boolean", "null"] }
+  paramSchema : Json := json% { type : ["object", "array", "string", "number", "boolean", "null"] }
   outputSchema : Json := json% { type : ["object", "array", "string", "number", "boolean", "null"] }
-  run (params : Json) : m Json
+  run (param : Json) : m Json
 
 def Command.liftM [MonadLiftT m n] (cmd : Command m) : Command n := 
-  { cmd with run params := cmd.run params }
+  { cmd with run param := cmd.run param }
 
 structure Commands (m : Type → Type) where
   data : Std.HashMap String <| Command m
@@ -27,13 +27,13 @@ def Commands.insert (cmds : Commands m) (trigger : String) (cmd : Command m) :
   data := cmds.data.insert trigger cmd
 
 def Commands.run [Monad m] [MonadExcept ε m] [MonadBacktrack σ m] 
-    (cmds : Commands m) (trigger : String) (params : Json) 
+    (cmds : Commands m) (trigger : String) (param : Json) 
     (unknownCmd : ErrorObj) (failedCmd : ε → ErrorObj) :
     m Output := do
   let some cmd := cmds.get trigger | return .error unknownCmd
   let state ← saveState
   try 
-    let out ← cmd.run params
+    let out ← cmd.run param
     return .response out
   catch e => 
     restoreState state

@@ -6,7 +6,7 @@ namespace MetaRepl
 
 structure Request where
   method : String
-  params : Json
+  param : Json
   id : Option UInt64 -- None is a notification
 deriving ToJson, FromJson
 
@@ -33,6 +33,7 @@ inductive Output where
 structure Server (m : Type → Type) where
   init : m Unit
   term : m Unit
+  finished : m Bool
   getRequest : m Request
   notify (method : String) (params : Json) : m Unit
   getOutput (method : String) (params : Json) : m Output
@@ -42,10 +43,10 @@ structure Server (m : Type → Type) where
 def Server.step [Monad m] (s : Server m) : m Unit := do
   let req ← s.getRequest
   match req.id with
-  | some id => match ← s.getOutput req.method req.params with
+  | some id => match ← s.getOutput req.method req.param with
     | .response res => s.sendResponse <| .mk res id
     | .error err => s.sendError <| .mk err id
-  | none => s.notify req.method req.params
+  | none => s.notify req.method req.param
 
 partial
 def Server.run [Monad m] [MonadLiftT IO m] (s : Server m) : 
@@ -53,11 +54,13 @@ def Server.run [Monad m] [MonadLiftT IO m] (s : Server m) :
 where go := do
   s.step
   if ← show IO _ from  IO.checkCanceled then return
+  if ← s.finished then return
   go
 
 structure StdServer (m : Type → Type) where
   init : m Unit
   term : m Unit
+  finished : m Bool
   notify (method : String) (params : Json) : m Unit
   getOutput (method : String) (params : Json) : m Output
 
@@ -66,6 +69,7 @@ def StdServer.server [Monad m] [MonadLiftT IO m] (s : StdServer m) :
     Server m where
   init := s.init
   term := s.term
+  finished := s.finished
   getRequest := do 
     let stdin ← show IO _ from IO.getStdin
     let line ← stdin.getLine
@@ -93,3 +97,4 @@ def StdServer.step [Monad m] [MonadLiftT IO m] (s : StdServer m) : m Unit :=
 
 def StdServer.run [Monad m] [MonadLiftT IO m] (s : StdServer m) : m Unit := 
   s.server.run
+

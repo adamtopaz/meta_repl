@@ -9,6 +9,7 @@ namespace MetaRepl
 structure ReplStruct (m : Type → Type) [MonadExcept ε m] where
   notifs : Notifications m
   cmds : Commands m
+  finished : m Bool
   unknownCmd : String → Json → ErrorObj
   failedCmd : String → Json → ε → ErrorObj
 
@@ -20,13 +21,13 @@ def ReplStruct.stdServer
     let cmdsArr : Array Json := repl.cmds.data.toArray.map fun (trigger, cmd) => 
       json% {
         method : $(trigger),
-        paramSchema : $(cmd.paramsSchema),
+        paramSchema : $(cmd.paramSchema),
         outputSchema : $(cmd.outputSchema)
       }
     let notifsArr : Array Json := repl.notifs.data.toArray.map fun (trigger, cmd) => 
       json% {
         method : $(trigger),
-        paramsSchema : $(cmd.paramsSchema)
+        paramSchema : $(cmd.paramSchema)
       }
     let configObj : Json := json% {
       commands : $(cmdsArr),
@@ -36,16 +37,17 @@ def ReplStruct.stdServer
     stdout.putStrLn <| Json.compress <| configObj
     stdout.flush
   term := return 
-  notify method params := repl.notifs.run method params 
-  getOutput method params := 
-    repl.cmds.run method params 
-      (repl.unknownCmd method params) 
-      (repl.failedCmd method params)
+  finished := repl.finished
+  notify method param := repl.notifs.run method param 
+  getOutput method param := 
+    repl.cmds.run method param 
+      (repl.unknownCmd method param) 
+      (repl.failedCmd method param)
 
 def ReplStruct.run 
     [Monad m] [MonadLiftT IO m] [MonadExcept ε m] 
     [MonadBacktrack σ m] (repl : ReplStruct m) :
     m Unit := do
-  -- notifications
-  -- cmds
+  repl.stdServer.run
+
   repl.stdServer.run

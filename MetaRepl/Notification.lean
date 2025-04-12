@@ -7,11 +7,11 @@ namespace MetaRepl
 
 structure Notification (m : Type → Type) where
   description : Option String := none
-  paramsSchema : Json := json% { type : ["object", "array", "string", "number", "boolean", "null"] }
-  run (params : Json) : m Unit
+  paramSchema : Json := json% { type : ["object", "array", "string", "number", "boolean", "null"] }
+  run (param : Json) : m Unit
 
 def Notification.liftM [MonadLiftT m n] (cmd : Notification m) : Notification n := 
-  { cmd with run params := cmd.run params }
+  { cmd with run param := cmd.run param }
 
 structure Notifications (m : Type → Type) where
   data : Std.HashMap String <| Notification m
@@ -28,11 +28,11 @@ def Notification.insert (cmds : Notifications m) (trigger : String)
   data := cmds.data.insert trigger cmd
 
 def Notifications.run [Monad m] [MonadExcept ε m] [MonadBacktrack σ m] 
-    (cmds : Notifications m) (trigger : String) (params : Json) :
+    (cmds : Notifications m) (trigger : String) (param : Json) :
     m Unit := do
   let some cmd := cmds.get trigger | return
   let state ← saveState
-  try cmd.run params
+  try cmd.run param
   catch _ => restoreState state
 
 initialize notificationsExt : 
