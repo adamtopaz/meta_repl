@@ -4,6 +4,4 @@ open Lean
 
 namespace MetaRepl
 
-
-
 end MetaRepl

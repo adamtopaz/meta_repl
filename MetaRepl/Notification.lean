@@ -16,6 +16,10 @@ def Notification.liftM [MonadLiftT m n] (cmd : Notification m) : Notification n 
 structure Notifications (m : Type → Type) where
   data : Std.HashMap String <| Notification m
 
+def Notifications.liftM [MonadLiftT m n] (notifs : Notifications m) : 
+    Notifications n where
+  data := notifs.data.map fun _ x => x.liftM
+
 def Notifications.get (cmds : Notifications m) (trigger : String) : 
     Option <| Notification m := 
   cmds.data.get? trigger

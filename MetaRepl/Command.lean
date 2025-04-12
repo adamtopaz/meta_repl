@@ -17,6 +17,9 @@ def Command.liftM [MonadLiftT m n] (cmd : Command m) : Command n :=
 structure Commands (m : Type → Type) where
   data : Std.HashMap String <| Command m
 
+def Commands.liftM [MonadLiftT m n] (cmds : Commands m) : Commands n where
+  data := cmds.data.map fun _ c => c.liftM
+
 def Commands.get (cmds : Commands m) (trigger : String) : Option <| Command m := 
   cmds.data.get? trigger
 

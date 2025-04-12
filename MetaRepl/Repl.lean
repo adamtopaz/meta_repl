@@ -13,6 +13,14 @@ structure ReplStruct (m : Type → Type) [MonadExcept ε m] where
   unknownCmd : String → Json → ErrorObj
   failedCmd : String → Json → ε → ErrorObj
 
+def ReplStruct.liftM [MonadLiftT m n] [MonadExcept ε m] [MonadExcept ε n]
+    (struct : ReplStruct m) : ReplStruct n where
+  notifs := struct.notifs.liftM
+  cmds := struct.cmds.liftM
+  finished := struct.finished
+  unknownCmd := struct.unknownCmd
+  failedCmd := struct.failedCmd
+
 def ReplStruct.stdServer 
     [Monad m] [MonadLiftT IO m] [MonadExcept ε m] 
     [MonadBacktrack σ m] (repl : ReplStruct m) :
@@ -34,9 +42,12 @@ def ReplStruct.stdServer
       notifications : $(notifsArr)
     }
     let stdout ← show IO _ from IO.getStdout
-    stdout.putStrLn <| Json.compress <| configObj
+    stdout.putStrLn s!"CONFIG {Json.compress <| configObj}"
     stdout.flush
-  term := return 
+  term := do 
+    let stdout ← show IO _ from IO.getStdout
+    stdout.putStrLn s!"TERM"
+    stdout.flush
   finished := repl.finished
   notify method param := repl.notifs.run method param 
   getOutput method param := 

@@ -71,6 +71,9 @@ def StdServer.server [Monad m] [MonadLiftT IO m] (s : StdServer m) :
   term := s.term
   finished := s.finished
   getRequest := do 
+    let stdout ← show IO _ from IO.getStdout
+    stdout.putStr ">>> "
+    stdout.flush
     let stdin ← show IO _ from IO.getStdin
     let line ← stdin.getLine
     match Json.parse line.trim with 
@@ -85,11 +88,11 @@ def StdServer.server [Monad m] [MonadLiftT IO m] (s : StdServer m) :
   getOutput := s.getOutput
   sendResponse res := do 
     let stdout ← show IO _ from IO.getStdout
-    stdout.putStrLn <| (toJson res).compress
+    stdout.putStrLn <| s!"<<< {toJson res |>.compress}"
     stdout.flush
   sendError err := do 
     let stdout ← show IO _ from IO.getStdout
-    stdout.putStrLn <| (toJson err).compress
+    stdout.putStrLn <| s!"<<< {toJson err |>.compress}"
     stdout.flush
 
 def StdServer.step [Monad m] [MonadLiftT IO m] (s : StdServer m) : m Unit := 
