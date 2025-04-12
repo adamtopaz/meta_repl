@@ -31,6 +31,8 @@ inductive Output where
   | error : ErrorObj → Output
 
 structure Server (m : Type → Type) where
+  init : m Unit
+  term : m Unit
   getRequest : m Request
   notify (method : String) (params : Json) : m Unit
   getOutput (method : String) (params : Json) : m Output
@@ -47,18 +49,23 @@ def Server.step [Monad m] (s : Server m) : m Unit := do
 
 partial
 def Server.run [Monad m] [MonadLiftT IO m] (s : Server m) : 
-    m Unit := do 
+    m Unit := do s.init ; go ; s.term
+where go := do
   s.step
   if ← show IO _ from  IO.checkCanceled then return
-  s.run
+  go
 
 structure StdServer (m : Type → Type) where
+  init : m Unit
+  term : m Unit
   notify (method : String) (params : Json) : m Unit
   getOutput (method : String) (params : Json) : m Output
 
 -- Single thread
 def StdServer.server [Monad m] [MonadLiftT IO m] (s : StdServer m) : 
     Server m where
+  init := s.init
+  term := s.term
   getRequest := do 
     let stdin ← show IO _ from IO.getStdin
     let line ← stdin.getLine
