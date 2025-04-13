@@ -1,6 +1,7 @@
 import MetaRepl.Server
 import MetaRepl.Command
 import MetaRepl.Notification
+import MetaRepl.History
 
 open Lean
 
@@ -61,4 +62,33 @@ def ReplStruct.run
     m Unit := do
   repl.stdServer.run
 
-  repl.stdServer.run
+def ReplStruct.withHistory 
+    [Monad m] [MonadExcept ε m] 
+    [MonadBacktrack σ m] [MonadState (History σ) m]
+    (err : String → m ε) (struct : ReplStruct m) : 
+    ReplStruct m where
+  cmds := { data := struct.cmds.data.map fun _ c => c.withHistory err }
+  notifs := { data := struct.notifs.data.map fun _ c => c.withHistory err }
+  finished := struct.finished
+  unknownCmd := struct.unknownCmd
+  failedCmd := struct.failedCmd
+
+def ReplStruct.addHistory 
+    [Monad m] [STWorld w m] [MonadLiftT (ST w) m]
+    [MonadExcept ε m] [MonadBacktrack σ m] 
+    (err : String → m ε) (struct : ReplStruct m) : 
+    ReplStruct (HistoryT m) :=
+  struct.liftM |>.withHistory fun s => err s
+
+def ReplStruct.runWithHistory 
+    [Monad m] [STWorld IO.RealWorld m] [MonadLiftT (ST IO.RealWorld) m]
+    [MonadLiftT IO m] [MonadExcept ε m] [MonadBacktrack σ m] 
+    (err : String → m ε) (struct : ReplStruct m) : m (History σ) := 
+  ((struct.addHistory err).run |>.run <| .mk #[]) <&> Prod.snd
+
+def ReplStruct.runWithHistory' 
+    [Monad m] [STWorld IO.RealWorld m] [MonadLiftT (ST IO.RealWorld) m]
+    [MonadLiftT IO m] [MonadExcept ε m] [MonadBacktrack σ m] 
+    (err : String → m ε) (struct : ReplStruct m) : m Unit := 
+  (struct.addHistory err).run |>.run' <| .mk #[]
+

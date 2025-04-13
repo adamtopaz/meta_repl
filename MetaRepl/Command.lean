@@ -1,4 +1,5 @@
 import MetaRepl.Server
+import MetaRepl.History
 import Lean
 
 open Lean
@@ -54,6 +55,44 @@ initialize commandsExt :
   addEntryFn := fun m (a,b) => m.insert a b
   exportEntriesFn m := m.toArray
 }
+
+def Command.withHistory 
+    [Monad m] [MonadExcept ε m] 
+    [MonadBacktrack σ m] [MonadState (History σ) m]
+    (cmd : Command m) (err : String → m ε) : Command m where
+  description := cmd.description
+  paramSchema := json% {
+    state : "int",
+    param : $(cmd.paramSchema)
+  }
+  outputSchema := json% {
+    state  : "int",
+    output : $(cmd.outputSchema)
+  }
+  run j := do 
+    let .ok stateIdx := j.getObjValAs? Nat "state" 
+      | throw <| ← err s!"Failed to find state:\n{j}"
+    let hist ← get
+    let some s := hist.states[stateIdx]?
+      | throw <| ← err s!"State {stateIdx} is not a valid state index"
+    let .ok param := j.getObjValAs? Json "param"
+      | throw <| ← err s!"Failed to find param:\n{j}"
+    restoreState s
+    let out ← cmd.run param
+    let new ← saveState
+    modify fun h => { states := h.states.push new }
+    return json% {
+      state : $(hist.states.size),
+      output : $(out)
+    }
+
+def Command.addHistory 
+    [Monad m] [STWorld w m] [MonadLiftT (ST w) m]
+    [MonadExcept ε m] [MonadBacktrack σ m] 
+    (cmd : Command m) (err : String → m ε) : Command (HistoryT m) :=
+  cmd.liftM |>.withHistory fun s => err s
+
+
 
 open Lean Elab Term 
 

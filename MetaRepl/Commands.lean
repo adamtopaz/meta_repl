@@ -1,4 +1,4 @@
-import MetaRepl.History
+import MetaRepl.Command
 
 namespace MetaRepl
 
