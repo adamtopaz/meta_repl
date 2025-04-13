@@ -135,4 +135,20 @@ def elabCommand (trigger : String) (m : Expr) : TermElabM Expr := do
   let c ← Meta.mkConstWithFreshMVarLevels declName
   elabCommandForMonad c m
 
+syntax (name := commandsStx) "commands(" ident,* ")" : term 
+
+@[term_elab commandsStx]
+def elabCommands : TermElab := fun stx tp? => 
+  match stx with 
+  | `(term|commands($ids,*)) => do 
+    let some tp := tp? | throwError "Failed to infer type"
+    let_expr Commands m := tp | throwError "{← Meta.ppExpr tp} is not of the right form"
+    let ids := ids.getElems.map fun id => id.getId.toString
+    let cmds ← ids.mapM fun s => elabCommand s m
+    let mut out : Expr ← Meta.mkAppOptM ``Commands.empty #[m]
+    for (id, cmd) in ids.zip cmds do 
+      out ← Meta.mkAppOptM ``Commands.insert #[m,out,toExpr id,cmd]
+    return out
+  | _ => throwUnsupportedSyntax
+
 end MetaRepl

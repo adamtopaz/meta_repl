@@ -22,4 +22,22 @@ def tactic : Command TacticM where
       | .error e => throwError s!"Failed to parse parameter\n{s}\nas a tactic:\n{e}"
     | .error e => throwError s!"Parameter\n{p}\nis not a string:\n{e}"
 
+
+open Lean Elab Tactic in
+
+@[command goals]
+def goals : Command TacticM where
+  paramSchema := json% { type : "null" }
+  outputSchema := json% {
+    type: "array",
+    items: { type : "string" } 
+  }
+  description := "Get current goals"
+  run _ := withoutModifyingState do
+    let goals ← getUnsolvedGoals
+    let out : Array String ← goals.toArray.mapM fun goal => do
+      let fmt ← Meta.ppGoal goal
+      return fmt.pretty
+    return toJson out
+
 end MetaRepl

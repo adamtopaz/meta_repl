@@ -57,7 +57,7 @@ def Notifications.get (cmds : Notifications m) (trigger : String) :
 
 def Notifications.empty : Notifications m where data := {}
 
-def Notification.insert (cmds : Notifications m) (trigger : String) 
+def Notifications.insert (cmds : Notifications m) (trigger : String) 
     (cmd : Notification m) : 
     Notifications m where
   data := cmds.data.insert trigger cmd
@@ -123,5 +123,21 @@ def elabNotification (trigger : String) (m : Expr) : TermElabM Expr := do
     | throwError "Failed to find notification with trigger {trigger}"
   let c ← Meta.mkConstWithFreshMVarLevels declName
   elabNotificationForMonad c m
+
+syntax (name := notificationsStx) "notifications(" ident,* ")" : term 
+
+@[term_elab notificationsStx]
+def elabCommands : TermElab := fun stx tp? => 
+  match stx with 
+  | `(term|notifications($ids,*)) => do 
+    let some tp := tp? | throwError "Failed to infer type"
+    let_expr Notifications m := tp | throwError "{← Meta.ppExpr tp} is not of the right form"
+    let ids := ids.getElems.map fun id => id.getId.toString
+    let cmds ← ids.mapM fun s => elabNotification s m
+    let mut out : Expr ← Meta.mkAppOptM ``Notifications.empty #[m]
+    for (id, cmd) in ids.zip cmds do 
+      out ← Meta.mkAppOptM ``Notifications.insert #[m,out,toExpr id,cmd]
+    return out
+  | _ => throwUnsupportedSyntax
 
 end MetaRepl
