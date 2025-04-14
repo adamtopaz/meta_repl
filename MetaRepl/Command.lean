@@ -1,16 +1,15 @@
-import MetaRepl.Server
 import MetaRepl.History
 import Lean
 
-open Lean
+open Lean JsonRpc
 
 namespace MetaRepl
 
 structure Command (m : Type → Type) where
   description : Option String := none
-  paramSchema : Json := json% { type : ["object", "array", "string", "number", "boolean", "null"] }
-  outputSchema : Json := json% { type : ["object", "array", "string", "number", "boolean", "null"] }
-  run (param : Json) : m Json
+  paramSchema : Json := json% { type : ["object", "array"] }
+  outputSchema : Json := json% { type : ["object", "array"] }
+  run (params? : Option Json.Structured) : m Json
 
 def Command.liftM [MonadLiftT m n] (cmd : Command m) : Command n := 
   { cmd with run param := cmd.run param }
@@ -31,17 +30,22 @@ def Commands.insert (cmds : Commands m) (trigger : String) (cmd : Command m) :
   data := cmds.data.insert trigger cmd
 
 def Commands.run [Monad m] [MonadExcept ε m] [MonadBacktrack σ m] 
-    (cmds : Commands m) (trigger : String) (param : Json) 
-    (unknownCmd : ErrorObj) (failedCmd : ε → ErrorObj) :
-    m Output := do
-  let some cmd := cmds.get trigger | return .error unknownCmd
-  let state ← saveState
-  try 
-    let out ← cmd.run param
-    return .response out
-  catch e => 
-    restoreState state
-    return .error <| failedCmd e
+    (cmds : Commands m) (message : JsonRpc.Message)
+    (invalidRequest : JsonRpc.Message) 
+    (unknownCmd : JsonRpc.Message) 
+    (failedCmd : ε → JsonRpc.Message) :
+    m JsonRpc.Message := do
+  match message with
+  | .request id method params? =>
+    let some cmd := cmds.get method | return unknownCmd
+    let state ← saveState
+    try 
+      let out ← cmd.run params?
+      return .response id out
+    catch e => 
+      restoreState state
+      return failedCmd e
+  | _ => return invalidRequest
 
 initialize commandsExt : 
     PersistentEnvExtension 
@@ -55,44 +59,6 @@ initialize commandsExt :
   addEntryFn := fun m (a,b) => m.insert a b
   exportEntriesFn m := m.toArray
 }
-
-def Command.withHistory 
-    [Monad m] [MonadExcept ε m] 
-    [MonadBacktrack σ m] [MonadState (History σ) m]
-    (cmd : Command m) (err : String → m ε) : Command m where
-  description := cmd.description
-  paramSchema := json% {
-    state : "int",
-    param : $(cmd.paramSchema)
-  }
-  outputSchema := json% {
-    state  : "int",
-    output : $(cmd.outputSchema)
-  }
-  run j := do 
-    let .ok stateIdx := j.getObjValAs? Nat "state" 
-      | throw <| ← err s!"Failed to find state:\n{j}"
-    let hist ← get
-    let some s := hist.states[stateIdx]?
-      | throw <| ← err s!"State {stateIdx} is not a valid state index"
-    let .ok param := j.getObjValAs? Json "param"
-      | throw <| ← err s!"Failed to find param:\n{j}"
-    restoreState s
-    let out ← cmd.run param
-    let new ← saveState
-    modify fun h => { states := h.states.push new }
-    return json% {
-      state : $(hist.states.size),
-      output : $(out)
-    }
-
-def Command.addHistory 
-    [Monad m] [STWorld w m] [MonadLiftT (ST w) m]
-    [MonadExcept ε m] [MonadBacktrack σ m] 
-    (cmd : Command m) (err : String → m ε) : Command (HistoryT m) :=
-  cmd.liftM |>.withHistory fun s => err s
-
-
 
 open Lean Elab Term 
 

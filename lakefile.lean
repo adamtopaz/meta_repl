@@ -11,3 +11,4 @@ lean_lib «MetaRepl» where
 @[default_target]
 lean_exe «meta_repl» where
   root := `Main
+  supportInterpreter := true

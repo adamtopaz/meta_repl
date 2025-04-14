@@ -1,4 +1,3 @@
-import MetaRepl.Server
 import MetaRepl.History
 import Lean
 
@@ -9,40 +8,10 @@ namespace MetaRepl
 structure Notification (m : Type → Type) where
   description : Option String := none
   paramSchema : Json := json% { type : ["object", "array", "string", "number", "boolean", "null"] }
-  run (param : Json) : m Unit
+  run (params? : Option Json.Structured) : m Unit
 
 def Notification.liftM [MonadLiftT m n] (cmd : Notification m) : Notification n := 
   { cmd with run param := cmd.run param }
-
-def Notification.withHistory
-    [Monad m] [MonadExcept ε m] 
-    [MonadBacktrack σ m] [MonadState (History σ) m]
-    (cmd : Notification m) (err : String → m ε) : Notification m where
-  description := cmd.description
-  paramSchema := json% {
-    state : "int",
-    param : $(cmd.paramSchema)
-  }
-  run j := do 
-    let .ok stateIdx := j.getObjValAs? Nat "state" 
-      | throw <| ← err s!"Failed to find state:\n{j}"
-    let hist ← get
-    let some s := hist.states[stateIdx]?
-      | throw <| ← err s!"State {stateIdx} is not a valid state index"
-    let .ok param := j.getObjValAs? Json "param"
-      | throw <| ← err s!"Failed to find param:\n{j}"
-    restoreState s
-    cmd.run param
-    let new ← saveState
-    modify fun h => { states := h.states.push new }
-
-def Notification.addHistory
-    [Monad m] [STWorld w m] [MonadLiftT (ST w) m]
-    [MonadExcept ε m] [MonadBacktrack σ m] 
-    (cmd : Notification m) (err : String → m ε) : Notification (HistoryT m) :=
-  cmd.liftM |>.withHistory fun s => err s
-
-
 
 structure Notifications (m : Type → Type) where
   data : Std.HashMap String <| Notification m
@@ -63,12 +32,22 @@ def Notifications.insert (cmds : Notifications m) (trigger : String)
   data := cmds.data.insert trigger cmd
 
 def Notifications.run [Monad m] [MonadExcept ε m] [MonadBacktrack σ m] 
-    (cmds : Notifications m) (trigger : String) (param : Json) :
-    m Unit := do
-  let some cmd := cmds.get trigger | return
-  let state ← saveState
-  try cmd.run param
-  catch _ => restoreState state
+    (cmds : Notifications m) (message : JsonRpc.Message) 
+    (unknownNotif : JsonRpc.Message)
+    (invalidMessage : JsonRpc.Message) 
+    (failedNotif : ε → JsonRpc.Message) :
+    m (Option JsonRpc.Message) := do
+  match message with
+  | .notification method params? => 
+    let some cmd := cmds.get method | return unknownNotif
+    let state ← saveState
+    try 
+      cmd.run params?
+      return none
+    catch e => 
+      restoreState state
+      return failedNotif e
+  | _ => return invalidMessage
 
 initialize notificationsExt : 
     PersistentEnvExtension 
@@ -127,7 +106,7 @@ def elabNotification (trigger : String) (m : Expr) : TermElabM Expr := do
 syntax (name := notificationsStx) "notifications(" ident,* ")" : term 
 
 @[term_elab notificationsStx]
-def elabCommands : TermElab := fun stx tp? => 
+def elabNotifications : TermElab := fun stx tp? => 
   match stx with 
   | `(term|notifications($ids,*)) => do 
     let some tp := tp? | throwError "Failed to infer type"
