@@ -1,4 +1,4 @@
-import MetaRepl.History
+import MetaRepl.Types
 import Lean
 
 open Lean JsonRpc
@@ -9,7 +9,7 @@ structure Command (m : Type → Type) where
   description : Option String := none
   paramSchema : Json := json% { type : ["object", "array"] }
   outputSchema : Json := json% { type : ["object", "array"] }
-  run (params? : Option Json.Structured) : m Json
+  run (param : Json) : m Result
 
 def Command.liftM [MonadLiftT m n] (cmd : Command m) : Command n := 
   { cmd with run param := cmd.run param }
@@ -28,24 +28,6 @@ def Commands.empty : Commands m where data := {}
 def Commands.insert (cmds : Commands m) (trigger : String) (cmd : Command m) : 
     Commands m where
   data := cmds.data.insert trigger cmd
-
-def Commands.run [Monad m] [MonadExcept ε m] [MonadBacktrack σ m] 
-    (cmds : Commands m) (message : JsonRpc.Message)
-    (invalidRequest : JsonRpc.Message) 
-    (unknownCmd : JsonRpc.Message) 
-    (failedCmd : ε → JsonRpc.Message) :
-    m JsonRpc.Message := do
-  match message with
-  | .request id method params? =>
-    let some cmd := cmds.get method | return unknownCmd
-    let state ← saveState
-    try 
-      let out ← cmd.run params?
-      return .response id out
-    catch e => 
-      restoreState state
-      return failedCmd e
-  | _ => return invalidRequest
 
 initialize commandsExt : 
     PersistentEnvExtension 
