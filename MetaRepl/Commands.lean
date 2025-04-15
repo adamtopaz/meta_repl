@@ -5,7 +5,7 @@ namespace MetaRepl
 @[command ping]
 def pingPong [Monad m] : Command m where
   description := "Reply with the input parameters"
-  run j := return .result j
+  run j := return .mk j
 
 open Lean Elab Tactic in
 
@@ -19,7 +19,7 @@ def tactic : Command TacticM where
     let .ok tac := Lean.Parser.runParserCategory (← getEnv) `tactic tac
       | throwError "{tac} is not a tactic"
     evalTactic tac
-    return .result .null
+    return .mk .null
 
 open Lean Elab Tactic in
 
@@ -36,6 +36,6 @@ def goals : Command TacticM where
     let out : Array String ← goals.toArray.mapM fun goal => do
       let fmt ← Meta.ppGoal goal
       return fmt.pretty
-    return .result <| toJson out
+    return .mk <| toJson out
 
 end MetaRepl
