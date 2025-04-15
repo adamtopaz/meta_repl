@@ -10,25 +10,22 @@ inductive ReplErrorKind where
   | unknownCmd
   | failedCmd
   | invalidIdx
-  | other
 
-structure ReplInput where
-  idx : Nat
-  input : Input
+structure ReplError (ε : Type) where
+  kind : ReplErrorKind
+  input? : Option Input
+  error : ε
 
-structure ReplOutput where
-  idx : Nat
-  output : Output
-
-structure Repl [MonadExcept ε m] (cmds : Commands m) where
-  init : m Unit
-  term : m Unit
-  finished : m Bool
-  getInput : m ReplInput
-  unknownCmd : m ε
-  invalidIdx : m ε
-  mkError : ReplErrorKind → ε → m Error
-  sendOutput : ReplOutput → m Unit
+structure Repl [STWorld w m] [MonadBacktrack σ m] [MonadExcept ε m] 
+    (cmds : Commands m) where
+  init : HistoryT Input Output m Unit
+  term : HistoryT Input Output m Unit
+  finished : HistoryT Input Output m Bool
+  getInput : HistoryT Input Output m (Nat × Input)
+  unknownCmd : Nat → Input → HistoryT Input Output m ε
+  invalidIdx : Nat → Input → HistoryT Input Output m ε
+  mkError : ReplErrorKind → ε → HistoryT Input Output m Error
+  sendOutput : Output → HistoryT Input Output m Unit
 
 partial
 def Repl.run 
@@ -38,53 +35,32 @@ def Repl.run
   let s ← saveState
   Prod.snd <$> go.run { head := 0, states := #[s], history := #[] }
 where 
-step : HistoryT Input Output m Unit := do
-  let mut errKind : ReplErrorKind := .other
-  let mut input? : Option Input := none
-  let initialState ← saveState
-  try 
-    let ⟨idx,input⟩ ← try repl.getInput 
-      catch e => errKind := .failedInput ; throw e
-    input? := input
-    let some s := (← get).states[idx]?
-      | errKind := .invalidIdx ; throw <| ← repl.invalidIdx
-    modify fun h => { h with head := idx }
-    restoreState s
-    let some cmd := cmds.get input.method
-      | errKind := .unknownCmd ; throw <| ← repl.unknownCmd
-    let out ← try cmd.run input.param
-      catch e => errKind := .failedCmd ; throw e
-    let s ← saveState
-    let output : Output := .result out
-    modify fun h => {
-      head := h.states.size
-      states := h.states.push s
-      history := h.history.push { 
-        startIdx := h.head, 
-        endIdx := h.states.size, 
-        action := input, 
-        result := output 
-      }
-    }
-    repl.sendOutput ⟨(← get).head, output⟩
-  catch e => 
-    restoreState initialState
-    let err ← repl.mkError errKind e
-    let output : Output := .error err
-    modify fun h => {
-      head := h.head
-      states := h.states
-      history := h.history.push { 
-        startIdx := h.head, 
-        endIdx := h.head, 
-        action := input?, 
-        result := .error err
-      }
-    }
-    repl.sendOutput ⟨(← get).head, output⟩
+step : ExceptT (ReplError ε) (HistoryT Input Output m) (Option Input × Result) := 
+    commitIfNoEx do
+  let (idx, input) ← .adapt (.mk .failedInput none) <| .mk <| observing <| repl.getInput
+  let state : σ ← .adapt (.mk .invalidIdx input) <| .mk <| observing <| do 
+    let states := (← get).states
+    match states[idx]? with 
+    | some state => return state
+    | none => throw <| ← repl.invalidIdx idx input
+  let cmd : Command m ← .adapt (.mk .unknownCmd input) <| .mk <| observing <| do 
+    match cmds.get input.method with
+    | some cmd => return cmd
+    | none => throw <| ← repl.unknownCmd idx input
+  restoreState state
+  let out : Result ← .adapt (.mk .failedCmd input) <| .mk <| observing <| 
+    cmd.run input.param
+  return (input, out)
 loop : HistoryT Input Output m Unit := do 
   if ← repl.finished then return
-  step 
+  match ← step with
+  | .ok (inpt,res) => 
+    recordHistory inpt (.result res) (← saveState)
+    repl.sendOutput <| .result res
+  | .error err => 
+    let error : Error ← repl.mkError err.kind err.error
+    recordHistory err.input? (.error error) none
+    repl.sendOutput <| .error error
   loop
 go : HistoryT Input Output m Unit := do
   repl.init ; loop ; repl.term
