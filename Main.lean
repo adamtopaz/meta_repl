@@ -12,7 +12,7 @@ def main (args : List String) : IO UInt32 := do
   let repl : MetaRepl.UserRepl (m := TacticM) cmds := {
     init := return
     term := return
-    finished := return false
+    finished := return (← getUnsolvedGoals).isEmpty
     unknownCmd _ input := return .error (← getRef) m!"Unknown command {input.method}"
     invalidIdx idx _ := return .error (← getRef) m!"Invalid index {idx}"
     invalidInputIdx s := return .error (← getRef) m!"Invalid index {s}"

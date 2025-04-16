@@ -9,6 +9,7 @@ structure Command (m : Type → Type) where
   description : Option String := none
   paramSchema : Json := json% { type : ["object", "array"] }
   outputSchema : Json := json% { type : ["object", "array"] }
+  passive : Bool := true
   run (param : Json) : m Result
 
 def Command.liftM [MonadLiftT m n] (cmd : Command m) : Command n := 

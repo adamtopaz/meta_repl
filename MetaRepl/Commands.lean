@@ -13,6 +13,7 @@ open Lean Elab Tactic in
 def tactic : Command TacticM where
   paramSchema := json% { type : "string" }
   description := "Eval a tactic"
+  passive := false
   run j := do
     let .ok tac := j.getStr?
       | throwError "{j} is not a string"

@@ -47,13 +47,13 @@ structure Repl
   /-- This checks whether to terminate the loop. -/
   finished : ReplT m Bool
   /-- Obtain the next state index and input for the REPL. -/
-  getInput : ReplT m (Nat × Input)
+  getInput : ReplT m (Option Nat × Input)
   /-- Return an unknown command error. 
     Parameters are the state index and input. -/
-  unknownCmd : Nat → Input → ReplT m ε
+  unknownCmd : Option Nat → Input → ReplT m ε
   /-- Return an invalid index error. 
     Parameters are the state index and input. -/
-  invalidIdx : Nat → Input → ReplT m ε
+  invalidIdx : Option Nat → Input → ReplT m ε
   /-- The REPL tags errors with a kind and possibly an index and input.
     This function is meant to use such a tagged error to create an 
     error message to send. -/
@@ -70,12 +70,13 @@ def Repl.run
   let s ← saveState
   Prod.snd <$> (go.run' .default |>.run { head := 0, states := #[s], history := #[] })
 where 
-step : ExceptT (ReplError ε) (ReplT m) (Option Input × Result) := 
+step : ExceptT (ReplError ε) (ReplT m) (Option σ × Option Input × Result) := 
     commitIfNoEx do
   let (idx, input) ← .adapt (.mk .failedInput none none) <| .mk <| observing <| repl.getInput
   let state : σ ← .adapt (.mk .invalidIdx idx input) <| .mk <| observing <| do 
     let states := (← getThe (History Input Output σ)).states
-    match states[idx]? with 
+    let idx! := idx.getD <| ← show HistoryT Input Output m Nat from getHead
+    match states[idx!]? with 
     | some state => return state
     | none => throw <| ← repl.invalidIdx idx input
   let cmd : Command (ReplT m) ← .adapt (.mk .unknownCmd idx input) <| .mk <| observing <| do 
@@ -83,16 +84,22 @@ step : ExceptT (ReplError ε) (ReplT m) (Option Input × Result) :=
     | some cmd => return cmd
     | none => throw <| ← repl.unknownCmd idx input
   restoreState state
-  let out : Result ← .adapt (.mk .failedCmd idx input) <| .mk <| observing <| 
-    cmd.run input.param
-  return (input, out)
+  let out : Result ← .adapt (.mk .failedCmd idx input) <| .mk <| observing <| do
+    let preCmdState ← saveState
+    let out ← cmd.run input.param
+    if cmd.passive then restoreState preCmdState
+    return out
+  let newState : Option σ ← match cmd.passive with
+    | true => pure none
+    | false => saveState
+  return (newState, input, out)
 loop : ReplT m Unit := do 
   if ← repl.finished then return
   if (← getThe ReplSignal) matches .close then return
   match ← step with
-  | .ok (inpt,res) => 
+  | .ok (st,inpt,res) => 
     show HistoryT Input Output m Unit from 
-      recordHistory inpt (.result res) (← saveState)
+      recordHistory inpt (.result res) st
     repl.sendOutput (← getThe <| History Input Output σ).head <| .result res
   | .error err =>
     let error : Error ← repl.mkError err
@@ -113,10 +120,10 @@ structure UserRepl
   /-- This checks whether to terminate the loop. -/
   finished : ReplT m Bool
   /-- Obtain the next state index and input for the REPL. -/
-  unknownCmd : Nat → Input → ReplT m ε
+  unknownCmd : Option Nat → Input → ReplT m ε
   /-- Return an invalid index error. 
     Parameters are the state index and input. -/
-  invalidIdx : Nat → Input → ReplT m ε
+  invalidIdx : Option Nat → Input → ReplT m ε
   /-- The REPL tags errors with a kind and possibly an index and input.
     This function is meant to use such a tagged error to create an 
     error message to send. -/
@@ -141,15 +148,16 @@ def UserRepl.repl
     let stdin ← show IO _ from IO.getStdin
     IO.print "idx> "
     let line ← stdin.getLine
-    let some idx := line.trim.toNat? 
-      | throw <| ← repl.invalidInputIdx line.trim
+    let idx := line.trim.toNat? 
     IO.print "method> "
     let line ← stdin.getLine
     let method := line.trim
     IO.print "param> "
     let line ← stdin.getLine
-    let .ok param := Lean.Json.parse line.trim
-      | throw <| ← repl.invalidInputParam line.trim
+    let param : Json := 
+      match Lean.Json.parse line.trim with
+      | .ok j => j
+      | _ => .null
     return ⟨idx, method, param⟩
   sendOutput idx output := do
     println! s!"idx: {idx}"
