@@ -1,4 +1,4 @@
-import MetaRepl.Command
+import MetaRepl.Repl
 
 namespace MetaRepl
 
@@ -37,5 +37,13 @@ def goals : Command TacticM where
       let fmt ← Meta.ppGoal goal
       return fmt.pretty
     return .mk <| toJson out
+
+@[command close]
+def close [Monad m] [MonadState ReplSignal m] : Command m where
+  paramSchema := json% { type : "null" }
+  outputSchema := json% { type : "null" }
+  run _ := do 
+    modify fun _ => .close
+    return .mk .null
 
 end MetaRepl

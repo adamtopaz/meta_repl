@@ -87,3 +87,8 @@ def Lean.Parser.InputContext.visitOriginalTacticInfos
     if ← filter i then go ctxInfo i else return
   | _, _ => return
 
+
+def Lean.Elab.TacticInfo.runTacticM 
+    (info : TacticInfo) (ctx : ContextInfo) (e : Elab.Tactic.TacticM α) : IO α := 
+  { ctx with mctx := info.mctxBefore }.runMetaM {} <| Term.TermElabM.run' <| 
+  e.run { elaborator := .anonymous } |>.run' { goals := info.goalsBefore }

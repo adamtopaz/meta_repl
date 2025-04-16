@@ -63,7 +63,7 @@ def elabCommandForMonadViaLift (cmd m : Expr) : TermElabM Expr := do
 
 def elabCommandForMonadViaEval (cmd m : Expr) : TermElabM Expr := do
   let (args, binders, body) ← Meta.forallMetaTelescope <| ← Meta.inferType cmd
-  let_expr Command n := body 
+  let_expr Command n := body
     | throwError "{← Meta.ppExpr cmd} is not a function that outputs a command."
   unless ← Meta.isDefEq m n do 
     throwError "{← Meta.ppExpr n} is not defeq to {← Meta.ppExpr m}"
@@ -75,7 +75,7 @@ def elabCommandForMonadViaEval (cmd m : Expr) : TermElabM Expr := do
 def elabCommandForMonad (cmd m : Expr) : TermElabM Expr := do
   try elabCommandForMonadViaLift cmd m
   catch _ => try elabCommandForMonadViaEval cmd m
-  catch _ => throwError "Failed to elaborate {← Meta.ppExpr cmd} for monad {← Meta.ppExpr m}"
+  catch e => throw e
 
 def elabCommand (trigger : String) (m : Expr) : TermElabM Expr := do
   let some declName := commandsExt.getState (← getEnv) |>.get? trigger
@@ -90,7 +90,7 @@ def elabCommands : TermElab := fun stx tp? =>
   match stx with 
   | `(term|commands($ids,*)) => do 
     let some tp := tp? | throwError "Failed to infer type"
-    let_expr Commands m := tp | throwError "{← Meta.ppExpr tp} is not of the right form"
+    let_expr Commands m := ← Meta.whnf tp | throwError "{← Meta.ppExpr tp} is not of the right form"
     let ids := ids.getElems.map fun id => id.getId.toString
     let cmds ← ids.mapM fun s => elabCommand s m
     let mut out : Expr ← Meta.mkAppOptM ``Commands.empty #[m]
