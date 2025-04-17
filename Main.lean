@@ -1,8 +1,34 @@
 import MetaRepl
+import MetaRepl.ExprWithCtx
 
 open Lean Elab Tactic
+open MetaRepl
 
-def main (args : List String) : IO UInt32 := do
+unsafe def main (args : List String) : IO UInt32 := do
+  initSearchPath (← findSysroot)
+  show EIO _ Unit from Lean.withImportModules (trustLevel := 0) #[.mk `Lean false] {} fun env => 
+      discard <| Core.CoreM.toIO (α := Unit) 
+      (ctx := {fileName := "", options := {}, fileMap := default}) (s := {env}) do
+    let cmds : Commands (ReplT ExprCtxM) := commands(
+      close, 
+      ExprWithCtx.pp, 
+      ExprWithCtx.inferType,
+      ExprWithCtx.intro
+    )
+    let repl : ReplStruct cmds := {
+      init := return 
+      term := return
+      finished := return false
+      unknownCmd _ input := return .error (← getRef) s!"Invalid command {input.method}"
+      invalidIdx idx _ := return .error (← getRef) s!"Invalid index {idx}"
+      strToErr s := return .error (← getRef) s
+      errToStr s := s.toMessageData.toString
+    }
+    let initialState ← Meta.MetaM.run' do 
+      let nm := args[0]!.toName
+      return ⟨← mkConstWithLevelParams nm, ← getLCtx⟩
+    discard <| repl.jsonRepl.run |>.run initialState
+  /-
   let some path := args[0]?
     | throw <| .userError "Usage: lake exe meta_repl FILEPATH"
   let path : System.FilePath := .mk path
@@ -28,4 +54,5 @@ def main (args : List String) : IO UInt32 := do
   inputCtx.visitOriginalTacticInfos (filter := fun _ => return true) fun ctx info => do
     --println! ← info.format ctx
     info.runTacticM ctx <| discard <| repl.run
+  -/
   return 0
