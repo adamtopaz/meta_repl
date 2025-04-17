@@ -125,10 +125,9 @@ structure ReplStruct
   /-- Return an invalid index error. 
     Parameters are the state index and input. -/
   invalidIdx : Option Nat → Input → ReplT m ε
-  /-- The REPL tags errors with a kind and possibly an index and input.
-    This function is meant to use such a tagged error to create an 
-    error message to send. -/
+  /-- Convert a string to an error. -/
   strToErr : String → ReplT m ε
+  /-- Convert an error to a string. -/
   errToStr : ε → ReplT m String
 
 def ReplStruct.userRepl 
