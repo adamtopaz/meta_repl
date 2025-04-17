@@ -9,6 +9,7 @@ def main (args : List String) : IO UInt32 := do
   let inputCtx ← Lean.Parser.readInputContext path
   let cmds : MetaRepl.Commands (MetaRepl.ReplT TacticM) := 
     commands(close, tactic, goals)
+  /-
   let repl : MetaRepl.UserRepl (m := TacticM) cmds := {
     init := return
     term := return
@@ -19,7 +20,12 @@ def main (args : List String) : IO UInt32 := do
     invalidInputParam s := return .error (← getRef) m!"Invalid param {s}"
     mkError s := return .mk (← show IO _ from s.error.toMessageData.toString) .null
   }
+  -/
+  let repl := MetaRepl.jsonRepl (m := TacticM) (cmds := cmds) 
+    (return (← getUnsolvedGoals).isEmpty) 
+    (fun s => return .error (← getRef) s) 
+    (fun e => e.toMessageData.toString)
   inputCtx.visitOriginalTacticInfos (filter := fun _ => return true) fun ctx info => do
-    println! ← info.format ctx
-    info.runTacticM ctx <| discard <| repl.repl.run
+    --println! ← info.format ctx
+    info.runTacticM ctx <| discard <| repl.run
   return 0

@@ -10,6 +10,7 @@ inductive ReplErrorKind where
   | unknownCmd
   | failedCmd
   | invalidIdx
+deriving ToJson, FromJson
 
 structure ReplError (ε : Type) where
   kind : ReplErrorKind
@@ -162,5 +163,68 @@ def UserRepl.repl
   sendOutput idx output := do
     println! s!"idx: {idx}"
     println! s!"out: {toJson output}"
+
+def jsonRepl 
+    [Monad m] [STWorld IO.RealWorld m] [MonadLiftT (ST IO.RealWorld) m]
+    [MonadLiftT IO m] [MonadBacktrack σ m] [MonadExcept ε m]
+    (finished : ReplT m Bool) 
+    (strToErr : String → m ε)
+    (errToStr : ε → m String)
+    (cmds : Commands (ReplT m)) : Repl cmds where
+  init := do 
+    let cmds : Array Json := cmds.data.toArray.map fun (trigger, cmd) => json% {
+      command : $(trigger),
+      passive : $(cmd.passive),
+      description : $(cmd.description),
+      paramSchema : $(cmd.paramSchema),
+      outputSchema : $(cmd.outputSchema)
+    }
+    printlnFlush s!"COMMANDS {toJson cmds |>.compress}"
+  term := printlnFlush "FINISHED"
+  finished := finished
+  getInput := do 
+    printFlush ">>> "
+    let stdin ← show IO _ from IO.getStdin
+    let line ← stdin.getLine
+    let json ← show ReplT m Json from match Lean.Json.parse line.trim with
+      | .ok j => return j
+      | .error e => do 
+        throw <| ← strToErr s!"Failed to parse\n{line.trim}\nas JSON:\n{e}"
+    let idx : Option Nat := 
+      match json.getObjValAs? Nat "idx" with
+      | .ok n => n
+      | .error _ => none
+    let input ← show ReplT m Input from match json.getObjValAs? Input "input" with
+      | .ok input => return input
+      | .error e => do 
+        throw <| ← strToErr s!"Failed to get input:\n{e}"
+    return (idx, input)
+  unknownCmd _ input := strToErr s!"Unknown command {input.method}"
+  invalidIdx idx _ := match idx with 
+    | some idx => strToErr s!"Invalid idx {idx}" 
+    | none => strToErr s!"Unexpected Error: idx is none, but failed to obtain associated state"
+  mkError err := return {
+    message := ← errToStr err.error
+    data := json% {
+      errorKind : $(err.kind),
+      input? : $(err.input?),
+      idx? : $(err.idx?)
+    }
+  }
+  sendOutput idx out := do
+    let j : Json := json% {
+      idx : $(idx),
+      output : $(out)
+    }
+    printlnFlush s!"<<< {j.compress}"
+where 
+printFlush (s : String) : m Unit := do 
+  let stdout ← show IO _ from IO.getStdout
+  stdout.putStr s
+  stdout.flush
+printlnFlush (s : String) : m Unit := do 
+  let stdout ← show IO _ from IO.getStdout
+  stdout.putStrLn s
+  stdout.flush
 
 end MetaRepl
