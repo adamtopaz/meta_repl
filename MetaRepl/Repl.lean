@@ -69,7 +69,7 @@ def Repl.run
     [MonadBacktrack σ m] [MonadExcept ε m]
     {cmds : Commands (ReplT m)} (repl : Repl cmds) : m (History Input Output σ) := do
   let s ← saveState
-  Prod.snd <$> (go.run' .default |>.run { head := 0, states := #[s], history := #[] })
+  Prod.snd <$> (go.run' .default |>.run { head := 0, states := #[s], parent := {} })
 where 
 step : ExceptT (ReplError ε) (ReplT m) (Option σ × Option Input × Result) := 
     commitIfNoEx do

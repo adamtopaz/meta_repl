@@ -4,16 +4,15 @@ open Lean
 
 namespace MetaRepl
 
-structure HistoryStep (α ω : Type) where
+structure ParentStruct (α ω : Type) where
   action : Option α
   result : ω
-  startIdx : Nat
-  endIdx : Nat
+  parentIdx : Nat
 
 structure History (α ω σ : Type) where
   head : Nat
   states : Array σ
-  history : Array <| HistoryStep α ω
+  parent : Std.HashMap Nat <| ParentStruct α ω
 
 def History.record (h : History α ω σ) (a : Option α) (w : ω) (s : Option σ) :
     History α ω σ :=
@@ -21,22 +20,12 @@ match s with
 | some s => {
     head := h.states.size
     states := h.states.push s
-    history := h.history.push {
-      action := a
-      result := w
-      startIdx := h.head
-      endIdx := h.states.size
-    }
+    parent := h.parent.insert h.states.size { action := a, result := w, parentIdx := h.head }
   }
 | none => {
     head := h.head
     states := h.states
-    history := h.history.push {
-      action := a
-      result := w
-      startIdx := h.head
-      endIdx := h.head
-    }
+    parent := h.parent.insert h.head { action := a, result := w, parentIdx := h.head }
   }
 
 abbrev HistoryT (α ω : Type) (m : Type → Type)
