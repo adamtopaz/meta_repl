@@ -14,7 +14,7 @@ deriving ToJson, FromJson
 inductive ReplError (ε : Type) where
   | cmdError : CommandsError ε → ReplError ε
   | failedInput : ReplError ε
-  | invalidIdx : ReplError ε
+  | invalidIdx : Nat → ReplError ε
 
 inductive ReplSignal where
   | default
@@ -22,7 +22,7 @@ inductive ReplSignal where
 
 abbrev ReplT (m : Type → Type) 
     [STWorld w m] [MonadBacktrack σ m] := 
-  StateRefT ReplSignal (HistoryT Input Output m)
+  StateRefT ReplSignal (HistoryT Input m)
 
 instance [Monad m] [STWorld w m] [MonadBacktrack σ m] : 
     MonadBacktrack σ (ReplT m) where
@@ -59,7 +59,7 @@ partial
 def Repl.run 
     [Monad m] [STWorld w m] [MonadLiftT (ST w) m] 
     [MonadBacktrack σ m] [MonadExcept ε m]
-    {cmds : Commands (ReplT m)} (repl : Repl cmds) : m (History Input Output σ) := do
+    {cmds : Commands (ReplT m)} (repl : Repl cmds) : m (History Input σ) := do
   let s ← saveState
   Prod.snd <$> (go.run' .default |>.run { head := 0, states := #[s], parent := {} })
 where 
@@ -67,11 +67,11 @@ step : ExceptT (ReplError ε) (ReplT m) (Input × Result) :=
     commitIfNoEx do
   let (idx, input) ← .adapt (fun _ => .failedInput) <| .mk <| observing <| repl.getInput
 --  let state : σ ← .adapt (fun _ => .invalidIdx) <| .mk <| observing <| do 
-  let states := (← getThe (History Input Output σ)).states
-  let idx! := idx.getD <| ← show HistoryT Input Output m Nat from getHead
+  let states := (← getThe (History Input σ)).states
+  let idx! := idx.getD <| ← show HistoryT Input m Nat from getHead
   let state : σ ← show ExceptT (ReplError ε) (ReplT m) σ from match states[idx!]? with 
     | some state => return state
-    | none => throw .invalidIdx
+    | none => throw <| .invalidIdx idx!
   restoreState state
   match ← cmds.run input |>.run with
   | .ok res => return (input, res)
@@ -81,12 +81,12 @@ loop : ReplT m Unit := do
   if (← getThe ReplSignal) matches .close then return
   match ← step with
   | .ok (inpt,res) => 
-    show HistoryT Input Output m Unit from 
+    show HistoryT Input m Unit from 
       recordHistory inpt (← saveState)
-    repl.sendOutput (← getThe <| History Input Output σ).head <| .result res
+    repl.sendOutput (← getThe <| History Input σ).head <| .result res
   | .error err =>
     let error : Error ← repl.mkError err
-    repl.sendOutput (← getThe <| History Input Output σ).head <| .error error
+    repl.sendOutput (← getThe <| History Input σ).head <| .error error
   loop
 go : ReplT m Unit := do
   repl.init ; loop ; repl.term
@@ -101,7 +101,7 @@ structure ReplStruct
   /-- This checks whether to terminate the loop. -/
   finished : ReplT m Bool
   strToErr : String → ReplT m ε
-  mkError : ReplError ε → ReplT m Error
+  errToStr : ε → ReplT m String
 
 def ReplStruct.userRepl 
     [Monad m] 
@@ -113,7 +113,11 @@ def ReplStruct.userRepl
   init := repl.init
   term := repl.term
   finished := repl.finished
-  mkError := repl.mkError
+  mkError err := match err with 
+    | .failedInput => return .mk "Failed input" .null
+    | .invalidIdx idx => return .mk "Invalid index" idx
+    | .cmdError (.unknownCmd s) => return .mk "Unknown command" s
+    | .cmdError (.failedCmd e) => return .mk "Failed command" (← repl.errToStr e)
   getInput := do
     let stdin ← show IO _ from IO.getStdin
     IO.print "idx> "
@@ -142,7 +146,6 @@ def ReplStruct.jsonRepl
   init := repl.init
   term := repl.term
   finished := repl.finished
-  mkError := repl.mkError
   getInput := do
     let stdout ← show IO _ from IO.getStdout
     stdout.putStr ">>> "
@@ -170,5 +173,10 @@ def ReplStruct.jsonRepl
     let stdout ← show IO _ from IO.getStdout
     stdout.putStrLn s!"<<< {j.compress}"
     stdout.flush
+  mkError err := match err with 
+    | .failedInput => return .mk "Failed input" .null
+    | .invalidIdx idx => return .mk "Invalid index" idx
+    | .cmdError (.unknownCmd s) => return .mk "Unknown command" s
+    | .cmdError (.failedCmd e) => return .mk "Failed command" (← repl.errToStr e)
 
 end MetaRepl

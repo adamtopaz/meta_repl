@@ -25,7 +25,7 @@ def forgetCmd [Monad m] [STWorld w m] [MonadLiftT (ST w) m] [Lean.MonadBacktrack
   passive := true
   impl _ := do 
     let s ← Lean.saveState
-    set (σ := History Input Output σ) {
+    set (σ := History Input σ) {
       head := 0
       states := #[s]
       parent := {}

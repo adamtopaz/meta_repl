@@ -53,7 +53,7 @@ def Commands.insert (cmds : Commands m) (trigger : String) (cmd : Command m) :
 
 inductive CommandsError (ε : Type) where
   | failedCmd : ε → CommandsError ε
-  | unknownCmd : CommandsError ε
+  | unknownCmd : String → CommandsError ε
 
 def Commands.run 
     [Monad m] [MonadBacktrack σ m] [MonadExcept ε m] 
@@ -62,7 +62,7 @@ def Commands.run
   match cmds.get input.method with
   | some cmd => 
     .adapt (fun e => .failedCmd e) <| .mk <| observing <| cmd.impl input.param
-  | none => throw .unknownCmd
+  | none => throw <| .unknownCmd input.method
 
 initialize commandsExt : 
     PersistentEnvExtension 

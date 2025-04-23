@@ -6,16 +6,15 @@ namespace MetaRepl
 
 structure ParentStruct (α : Type) where
   action : α
---  result : ω
   parentIdx : Nat
 
-structure History (α ω σ : Type) where
+structure History (α σ : Type) where
   head : Nat
   states : Array σ
   parent : Std.HashMap Nat <| ParentStruct α 
 
-def History.record (h : History α ω σ) (a : α) (s : Option σ) :
-    History α ω σ :=
+def History.record (h : History α σ) (a : α) (s : Option σ) :
+    History α σ :=
 match s with
 | some s => {
     head := h.states.size
@@ -28,12 +27,12 @@ match s with
     parent := h.parent.insert h.head { action := a, parentIdx := h.head }
   }
 
-def History.revert (h : History α ω σ) : Option α × History α ω σ := 
+def History.revert (h : History α σ) : Option α × History α σ := 
   match h.parent.get? h.head with
   | some ⟨a,i⟩ => (a, { h with head := i })
   | none => (none, h)
 
-def History.trace (h : History α ω σ) : Array α := Id.run do 
+def History.trace (h : History α σ) : Array α := Id.run do 
   let mut out := #[]
   let mut hist := h
   while true do
@@ -45,28 +44,28 @@ def History.trace (h : History α ω σ) : Array α := Id.run do
     | none => break
   return out
 
-abbrev HistoryT (α ω : Type) (m : Type → Type)
+abbrev HistoryT (α : Type) (m : Type → Type)
     [STWorld w m] [MonadBacktrack σ m] :=
-  StateRefT (History α ω σ) m
+  StateRefT (History α σ) m
 
 instance [STWorld w m] [MonadBacktrack σ m] :
-    MonadBacktrack σ (HistoryT α ω m) where
+    MonadBacktrack σ (HistoryT α m) where
   saveState := show m _ from saveState
   restoreState s := show m _ from restoreState s
 
 instance [STWorld w m] [MonadBacktrack σ m] [MonadExcept ε m] :
-    MonadExcept ε (HistoryT α ω m) where
+    MonadExcept ε (HistoryT α m) where
   throw e _ := throw e
   tryCatch e f s := tryCatch (e s) (fun t => f t s)
 
 def recordHistory
     [Monad m] [STWorld w m] [MonadLiftT (ST w) m] [MonadBacktrack σ m]
     (a : α) (s : Option σ) :
-    HistoryT α ω m Unit := do
+    HistoryT α m Unit := do
   modify fun h => h.record a s
 
 def getHead
     [Monad m] [STWorld w m] [MonadLiftT (ST w) m] [MonadBacktrack σ m] :
-    HistoryT α ω m Nat := return (← get).head
+    HistoryT α m Nat := return (← get).head
 
 end MetaRepl
