@@ -12,11 +12,25 @@ structure Command (m : Type → Type) where
   passive : Bool := true
   run (param : Json) : m Result
 
+def Command.spec (cmd : Command m) : Json := json% {
+  description : $cmd.description,
+  paramSchema : $cmd.paramSchema,
+  outputSchema : $cmd.outputSchema,
+  passive : $cmd.passive
+}
+
 def Command.liftM [MonadLiftT m n] (cmd : Command m) : Command n := 
   { cmd with run param := cmd.run param }
 
 structure Commands (m : Type → Type) where
   data : Std.HashMap String <| Command m
+
+def Commands.spec (cmds : Commands m) : Array Json := 
+    cmds.data.toArray.map fun (method, cmd) => 
+  json% {
+    method : $method,
+    spec : $cmd.spec
+  }
 
 def Commands.liftM [MonadLiftT m n] (cmds : Commands m) : Commands n where
   data := cmds.data.map fun _ c => c.liftM
