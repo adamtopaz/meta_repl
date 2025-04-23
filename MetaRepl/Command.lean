@@ -10,7 +10,14 @@ structure Command (m : Type → Type) where
   paramSchema : Json := json% { type : ["object", "array"] }
   outputSchema : Json := json% { type : ["object", "array"] }
   passive : Bool := true
-  run (param : Json) : m Result
+  impl (param : Json) : m Result
+
+def Command.run [Monad m] [MonadBacktrack σ m] 
+    (cmd : Command m) (param : Json) : m Result := do
+  let preCmdState ← saveState
+  let out ← cmd.impl param
+  if cmd.passive then restoreState preCmdState
+  return out
 
 def Command.spec (cmd : Command m) : Json := json% {
   description : $cmd.description,
@@ -20,7 +27,7 @@ def Command.spec (cmd : Command m) : Json := json% {
 }
 
 def Command.liftM [MonadLiftT m n] (cmd : Command m) : Command n := 
-  { cmd with run param := cmd.run param }
+  { cmd with impl param := cmd.impl param }
 
 structure Commands (m : Type → Type) where
   data : Std.HashMap String <| Command m
@@ -43,6 +50,19 @@ def Commands.empty : Commands m where data := {}
 def Commands.insert (cmds : Commands m) (trigger : String) (cmd : Command m) : 
     Commands m where
   data := cmds.data.insert trigger cmd
+
+inductive CommandsError (ε : Type) where
+  | failedCmd : ε → CommandsError ε
+  | unknownCmd : CommandsError ε
+
+def Commands.run 
+    [Monad m] [MonadBacktrack σ m] [MonadExcept ε m] 
+    (cmds : Commands m) (input : Input) : 
+    ExceptT (CommandsError ε) m Result := do
+  match cmds.get input.method with
+  | some cmd => 
+    .adapt (fun e => .failedCmd e) <| .mk <| observing <| cmd.impl input.param
+  | none => throw .unknownCmd
 
 initialize commandsExt : 
     PersistentEnvExtension 

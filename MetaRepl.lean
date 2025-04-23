@@ -2,6 +2,7 @@ import MetaRepl.Command
 import MetaRepl.History
 import MetaRepl.Repl
 import MetaRepl.Types
+import MetaRepl.Replay
 
 namespace MetaRepl
 
@@ -11,7 +12,7 @@ def closeCmd [Monad m] [MonadState ReplSignal m] : Command m where
   paramSchema := json% { type : "null" }
   outputSchema := json% { type : "null" }
   passive := true
-  run _ := do 
+  impl _ := do 
     modify fun _ => .close
     return ⟨.null⟩
 
@@ -22,7 +23,7 @@ def forgetCmd [Monad m] [STWorld w m] [MonadLiftT (ST w) m] [Lean.MonadBacktrack
   paramSchema := json% { type : "null" }
   outputSchema := json% { type : "null" }
   passive := true
-  run _ := do 
+  impl _ := do 
     let s ← Lean.saveState
     set (σ := History Input Output σ) {
       head := 0

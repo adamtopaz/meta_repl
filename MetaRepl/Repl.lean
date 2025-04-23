@@ -5,18 +5,16 @@ open Lean
 
 namespace MetaRepl
 
-inductive ReplErrorKind where
+inductive ReplErrorTag where
   | failedInput
-  | unknownCmd
-  | failedCmd
   | invalidIdx
+  | cmdsError
 deriving ToJson, FromJson
 
-structure ReplError (ε : Type) where
-  kind : ReplErrorKind
-  idx? : Option Nat
-  input? : Option Input
-  error : ε
+inductive ReplError (ε : Type) where
+  | cmdError : CommandsError ε → ReplError ε
+  | failedInput : ReplError ε
+  | invalidIdx : ReplError ε
 
 inductive ReplSignal where
   | default
@@ -49,12 +47,6 @@ structure Repl
   finished : ReplT m Bool
   /-- Obtain the next state index and input for the REPL. -/
   getInput : ReplT m (Option Nat × Input)
-  /-- Return an unknown command error. 
-    Parameters are the state index and input. -/
-  unknownCmd : Option Nat → Input → ReplT m ε
-  /-- Return an invalid index error. 
-    Parameters are the state index and input. -/
-  invalidIdx : Option Nat → Input → ReplT m ε
   /-- The REPL tags errors with a kind and possibly an index and input.
     This function is meant to use such a tagged error to create an 
     error message to send. -/
@@ -71,41 +63,29 @@ def Repl.run
   let s ← saveState
   Prod.snd <$> (go.run' .default |>.run { head := 0, states := #[s], parent := {} })
 where 
-step : ExceptT (ReplError ε) (ReplT m) (Option σ × Option Input × Result) := 
+step : ExceptT (ReplError ε) (ReplT m) (Input × Result) := 
     commitIfNoEx do
-  let (idx, input) ← .adapt (.mk .failedInput none none) <| .mk <| observing <| repl.getInput
-  let state : σ ← .adapt (.mk .invalidIdx idx input) <| .mk <| observing <| do 
-    let states := (← getThe (History Input Output σ)).states
-    let idx! := idx.getD <| ← show HistoryT Input Output m Nat from getHead
-    match states[idx!]? with 
+  let (idx, input) ← .adapt (fun _ => .failedInput) <| .mk <| observing <| repl.getInput
+--  let state : σ ← .adapt (fun _ => .invalidIdx) <| .mk <| observing <| do 
+  let states := (← getThe (History Input Output σ)).states
+  let idx! := idx.getD <| ← show HistoryT Input Output m Nat from getHead
+  let state : σ ← show ExceptT (ReplError ε) (ReplT m) σ from match states[idx!]? with 
     | some state => return state
-    | none => throw <| ← repl.invalidIdx idx input
-  let cmd : Command (ReplT m) ← .adapt (.mk .unknownCmd idx input) <| .mk <| observing <| do 
-    match cmds.get input.method with
-    | some cmd => return cmd
-    | none => throw <| ← repl.unknownCmd idx input
+    | none => throw .invalidIdx
   restoreState state
-  let out : Result ← .adapt (.mk .failedCmd idx input) <| .mk <| observing <| do
-    let preCmdState ← saveState
-    let out ← cmd.run input.param
-    if cmd.passive then restoreState preCmdState
-    return out
-  let newState : Option σ ← match cmd.passive with
-    | true => pure none
-    | false => saveState
-  return (newState, input, out)
+  match ← cmds.run input |>.run with
+  | .ok res => return (input, res)
+  | .error e => throw <| .cmdError e
 loop : ReplT m Unit := do 
   if ← repl.finished then return
   if (← getThe ReplSignal) matches .close then return
   match ← step with
-  | .ok (st,inpt,res) => 
+  | .ok (inpt,res) => 
     show HistoryT Input Output m Unit from 
-      recordHistory inpt (.result res) st
+      recordHistory inpt (← saveState)
     repl.sendOutput (← getThe <| History Input Output σ).head <| .result res
   | .error err =>
     let error : Error ← repl.mkError err
-    show HistoryT Input Output m Unit from 
-      recordHistory err.input? (.error error) none
     repl.sendOutput (← getThe <| History Input Output σ).head <| .error error
   loop
 go : ReplT m Unit := do
@@ -120,15 +100,8 @@ structure ReplStruct
   term : ReplT m Unit
   /-- This checks whether to terminate the loop. -/
   finished : ReplT m Bool
-  /-- Obtain the next state index and input for the REPL. -/
-  unknownCmd : Option Nat → Input → ReplT m ε
-  /-- Return an invalid index error. 
-    Parameters are the state index and input. -/
-  invalidIdx : Option Nat → Input → ReplT m ε
-  /-- Convert a string to an error. -/
   strToErr : String → ReplT m ε
-  /-- Convert an error to a string. -/
-  errToStr : ε → ReplT m String
+  mkError : ReplError ε → ReplT m Error
 
 def ReplStruct.userRepl 
     [Monad m] 
@@ -140,16 +113,7 @@ def ReplStruct.userRepl
   init := repl.init
   term := repl.term
   finished := repl.finished
-  unknownCmd := repl.unknownCmd
-  invalidIdx := repl.invalidIdx
-  mkError err := return {
-    message := ← repl.errToStr err.error
-    data := json% {
-      kind : $(err.kind),
-      input? : $(err.input?),
-      idx? : $(err.idx?)
-    }
-  }
+  mkError := repl.mkError
   getInput := do
     let stdin ← show IO _ from IO.getStdin
     IO.print "idx> "
@@ -178,16 +142,7 @@ def ReplStruct.jsonRepl
   init := repl.init
   term := repl.term
   finished := repl.finished
-  unknownCmd := repl.unknownCmd
-  invalidIdx := repl.invalidIdx
-  mkError err := return {
-    message := ← repl.errToStr err.error
-    data := json% {
-      kind : $(err.kind),
-      input? : $(err.input?),
-      idx? : $(err.idx?)
-    }
-  }
+  mkError := repl.mkError
   getInput := do
     let stdout ← show IO _ from IO.getStdout
     stdout.putStr ">>> "
